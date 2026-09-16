@@ -25,6 +25,12 @@ def le_pagina(caminho_arquivo: str, n: int) -> bytes:
 
     with open(caminho_arquivo, "rb") as arquivo:
         arquivo.seek(offset)
-        return arquivo.read(PAGE_SIZE)
+        dados = arquivo.read(PAGE_SIZE)
+        if len(dados) != PAGE_SIZE:
+            raise IOError(f"Página {n} truncada: esperava {PAGE_SIZE} bytes, veio {len(dados)}")
+        return dados
 
+def calcula_deslocamento(pagina: int, slot: int) -> int:
+    """Calcula em qual byte absoluto do arquivo começa um registro."""
+    return (pagina * PAGE_SIZE) + HEADER_SIZE + (slot * RECORD_SIZE)
 
