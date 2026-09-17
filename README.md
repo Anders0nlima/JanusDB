@@ -13,4 +13,13 @@ Linguagem: Python.
 - [ ] M7 — Recuperação: log de escrita antecipada
 
 ## Como rodar os testes
-    python3 -m pytest tests/
+    $env:PYTHONPATH="."; pytest tests/test_registro.py -v
+
+## hexadecimal script
+    python -c "
+    with open('data/teste_registro.db', 'rb') as f:
+        f.seek(8192)
+        data = f.read(32)
+        for i in range(0, len(data), 16):
+           print(f'{8192+i:08x}  ' + ' '.join(f'{b:02x}' for b in data[i:i+16]))
+"
