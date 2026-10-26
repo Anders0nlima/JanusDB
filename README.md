@@ -12,9 +12,23 @@ Linguagem: Python.
 - [ ] M6 — Transações: BEGIN, COMMIT, ROLLBACK
 - [ ] M7 — Recuperação: log de escrita antecipada
 
+## Como executar o CLI (M4)
+
+O JanusDB disponibiliza um REPL interativo via terminal para execução direta de instruções SQL:
+
+```powershell
+python -m src.cli data/banco.db
+```
+
+Comandos SQL suportados:
+- `CREATE TABLE nome (coluna INT, coluna CHAR(n));`
+- `INSERT INTO nome VALUES (1, 'Texto');`
+- `SELECT * FROM nome;`
+- `SELECT col1, col2 FROM nome WHERE col = valor;`
+
 ## Como rodar os testes
 
-Para executar todos os testes (M1, M2 e M3):
+Para executar todos os testes do projeto (M1 ao M4):
 ```powershell
 $env:PYTHONPATH="."; pytest tests -v
 ```
@@ -29,6 +43,9 @@ $env:PYTHONPATH="."; pytest tests/test_cache.py -v
 
 # Testes do M3 (Árvore B+)
 $env:PYTHONPATH="."; pytest tests/test_btree.py -v
+
+# Testes do M4 (Parser, Catálogo e Engine)
+$env:PYTHONPATH="."; pytest tests/test_parser.py tests/test_catalog.py tests/test_engine.py -v
 ```
 
 ## Verificação Hexadecimal do Registro (M1)
@@ -41,27 +58,4 @@ with open('data/teste_registro.db', 'rb') as f:
     for i in range(0, len(data), 16):
         print(f'{8192+i:08x}  ' + ' '.join(f'{b:02x}' for b in data[i:i+16]))
 "
-```
-
-
-## M4 — Parser, catálogo e SQL inicial
-
-O M4 adiciona tokenizador (`src/tokenizer.py`), parser por descida recursiva
-(`src/parser.py`), catálogo persistente (`src/catalog.py`) e execução SQL inicial
-(`src/engine.py`). O REPL pode ser iniciado com:
-
-```powershell
-python -m src.cli data/meu_banco.db
-```
-
-Comandos suportados: `CREATE TABLE` com colunas `INT` e `CHAR(n)`, `INSERT INTO ... VALUES`
-e `SELECT *` ou projeção de colunas, opcionalmente com `WHERE coluna = valor`.
-Os metadados ficam em um arquivo lateral `<caminho-do-banco>.catalog.json`. Cada tabela
-usa uma página de dados e, por isso, ao atingir a capacidade dessa página, o M4 informa
-o limite; gerenciamento de múltiplas páginas e uso do índice serão evoluídos no M5.
-
-Para testar o M4:
-
-```powershell
-python -m pytest tests/test_parser.py tests/test_catalog.py tests/test_engine.py -v
 ```

@@ -1,9 +1,5 @@
-"""Catálogo persistente de tabelas do JanusDB.
+"""Catálogo persistente de tabelas do JanusDB."""
 
-Os metadados são armazenados em JSON ao lado do arquivo de dados. Esta escolha
-mantém o formato de páginas dos módulos M1-M3 intacto; uma futura etapa pode
-mover o catálogo para páginas próprias do banco.
-"""
 import json
 import os
 import tempfile
