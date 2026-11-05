@@ -12,12 +12,16 @@ Linguagem: Python.
 - [ ] M6 — Transações: BEGIN, COMMIT, ROLLBACK
 - [ ] M7 — Recuperação: log de escrita antecipada
 
-## Como executar o CLI (M4)
+## Executável e CLI (M4)
 
-O JanusDB disponibiliza um REPL interativo via terminal para execução direta de instruções SQL:
+O JanusDB disponibiliza o script executável `minidb` na raiz do projeto (ou `python -m src.cli`), suportando modo interativo e redirecionamento de entrada:
 
-```powershell
-python -m src.cli data/banco.db
+```bash
+# Execução por lote (arquivo de consultas):
+./minidb dados.db < consultas.sql
+
+# Ou modo interativo:
+./minidb dados.db
 ```
 
 Comandos SQL suportados:

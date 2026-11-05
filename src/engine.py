@@ -19,7 +19,7 @@ class Engine:
         self.caminho = caminho
         self.pager = Pager(caminho)
         self.cache = PageCache(self.pager, capacidade=capacidade_cache)
-        self.catalogo = Catalogo(caminho)
+        self.catalogo = Catalogo(self.cache)
 
     def _inicializa_pagina_tabela(self, pagina: int, tamanho_registro: int):
         buf = self.cache.get_page(pagina)
@@ -70,6 +70,7 @@ class Engine:
         HEADER.pack_into(buf, 0, magic, tamanho, quantidade + 1, reservado)
         self.cache.mark_dirty(tabela.pagina)
         self.cache.flush_page(tabela.pagina)
+        self.pager.sync()
         self.catalogo.atualiza_slots(tabela.nome, quantidade + 1)
         return "OK 1"
 
@@ -89,6 +90,7 @@ class Engine:
             tamanho = sum(c[2] for c in arvore["colunas"])
             self._inicializa_pagina_tabela(pagina, tamanho)
             self.cache.flush_page(pagina)
+            self.pager.sync()
             self.catalogo.cria_tabela(arvore["tabela"], arvore["colunas"], pagina)
             return "OK"
         tabela = self.catalogo.busca(arvore["tabela"])
@@ -110,7 +112,8 @@ class Engine:
             else:
                 indices = [self.catalogo.busca_coluna(tabela, n) for n in arvore["colunas"]]
             linhas = ["|".join(str(registro[i]) for i in indices) for registro in registros]
-            return "\n".join(linhas + [f"({len(linhas)} linhas)"])
+            sufixo_linha = "linha" if len(linhas) == 1 else "linhas"
+            return "\n".join(linhas + [f"({len(linhas)} {sufixo_linha})"])
         raise ErroSemantico(f"operação não suportada: {op}")
 
     def close(self):

@@ -10,7 +10,7 @@ def test_fluxo_sql_e_persistencia(tmp_path):
         assert db.executa("INSERT INTO aluno VALUES (1, 'Ana');") == "OK 1"
         assert db.executa("INSERT INTO aluno VALUES (2, 'Bruno')") == "OK 1"
         assert db.executa("SELECT * FROM aluno") == "1|Ana\n2|Bruno\n(2 linhas)"
-        assert db.executa("SELECT nome FROM aluno WHERE id = 2") == "Bruno\n(1 linhas)"
+        assert db.executa("SELECT nome FROM aluno WHERE id = 2") == "Bruno\n(1 linha)"
     with Engine(caminho) as db:
         assert db.executa("SELECT * FROM aluno") == "1|Ana\n2|Bruno\n(2 linhas)"
 

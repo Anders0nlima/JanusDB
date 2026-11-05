@@ -1,9 +1,25 @@
-"""Catálogo persistente de tabelas do JanusDB."""
+"""Catálogo persistente de tabelas do JanusDB (M4).
 
-import json
+O catálogo é uma tabela que descreve as outras tabelas (uma linha por tabela),
+armazenada fisicamente na página 1 do arquivo de dados.
+Cada registro ocupa 236 bytes:
+- nome: CHAR(32)
+- primeira: INT (4 bytes, offset da página inicial da tabela)
+- colunas: CHAR(200) (definições como 'id INT, matricula INT, nome CHAR(20)')
+"""
 import os
-import tempfile
-from dataclasses import asdict, dataclass
+import struct
+from dataclasses import dataclass
+
+from .cache import PageCache
+from .storage import HEADER_SIZE, PAGE_SIZE, Pager
+
+PAGINA_CATALOGO = 1
+TAM_REGISTRO_CATALOGO = 236
+MAGIC = b"JDB4"
+HEADER_PAGINA = struct.Struct("<4sHH8s")  # magic (4B), tam_reg (2B), slots_usados (2B), reservado (8B)
+CATALOG_RECORD_STRUCT = struct.Struct("<32sI200s")  # nome (32B), primeira (4B), colunas (200B)
+MAX_TABELAS_CATALOGO = (PAGE_SIZE - HEADER_SIZE) // TAM_REGISTRO_CATALOGO  # (4096 - 16) // 236 = 17
 
 
 class ErroSemantico(ValueError):
@@ -32,41 +48,83 @@ class Tabela:
         return sum(c.tamanho for c in self.colunas)
 
 
-class Catalogo:
-    def __init__(self, caminho_dados: str):
-        self.caminho = os.path.abspath(caminho_dados) + ".catalog.json"
-        self.tabelas: dict[str, Tabela] = {}
-        if os.path.exists(self.caminho):
-            try:
-                with open(self.caminho, "r", encoding="utf-8") as f:
-                    bruto = json.load(f)
-                for chave, item in bruto.get("tabelas", {}).items():
-                    colunas = tuple(Coluna(**c) for c in item["colunas"])
-                    self.tabelas[chave.casefold()] = Tabela(
-                        nome=item["nome"], colunas=colunas,
-                        pagina=int(item["pagina"]), slots_usados=int(item.get("slots_usados", 0)),
-                    )
-            except (OSError, ValueError, KeyError, TypeError) as exc:
-                raise ErroSemantico(f"catálogo corrompido ou ilegível: {exc}") from exc
+def analisa_colunas(texto_colunas: str) -> list[Coluna]:
+    """Desserializa a string de colunas do catálogo (ex: 'id INT, nome CHAR(20)')."""
+    from .parser import Parser
+    from .tokenizer import tokeniza
 
-    def salva(self):
-        pasta = os.path.dirname(self.caminho) or "."
-        os.makedirs(pasta, exist_ok=True)
-        dados = {"versao": 1, "tabelas": {
-            chave: {"nome": t.nome, "colunas": [asdict(c) for c in t.colunas],
-                    "pagina": t.pagina, "slots_usados": t.slots_usados}
-            for chave, t in self.tabelas.items()
-        }}
-        fd, temporario = tempfile.mkstemp(prefix="catalogo_", suffix=".tmp", dir=pasta, text=True)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(dados, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temporario, self.caminho)
-        finally:
-            if os.path.exists(temporario):
-                os.unlink(temporario)
+    p = Parser(tokeniza(texto_colunas))
+    cols = [p.coluna()]
+    while p.aceita("SIMBOLO", ","):
+        cols.append(p.coluna())
+    p.espera("FIM")
+    return [Coluna(nome, tipo, tam) for nome, tipo, tam in cols]
+
+
+def formata_colunas(colunas) -> str:
+    """Serializa a lista de colunas para string armazenável no catálogo."""
+    partes = []
+    for c in colunas:
+        if isinstance(c, Coluna):
+            nome, tipo, tam = c.nome, c.tipo, c.tamanho
+        else:
+            nome, tipo, tam = c[0], c[1], c[2]
+        if tipo.upper() == "INT":
+            partes.append(f"{nome} INT")
+        else:
+            partes.append(f"{nome} CHAR({tam})")
+    return ", ".join(partes)
+
+
+class Catalogo:
+    def __init__(self, cache_ou_caminho):
+        self._pager_proprio = None
+        if isinstance(cache_ou_caminho, str):
+            self.caminho = os.path.abspath(cache_ou_caminho)
+            self._pager_proprio = Pager(self.caminho)
+            self.cache = PageCache(self._pager_proprio)
+        elif isinstance(cache_ou_caminho, PageCache):
+            self.cache = cache_ou_caminho
+            self.caminho = getattr(self.cache.pager.f, "name", "banco.db")
+        else:
+            raise TypeError("Catalogo espera uma instância de PageCache ou caminho do arquivo")
+
+        self.tabelas: dict[str, Tabela] = {}
+        self._garante_pagina_catalogo()
+        self._carrega()
+
+    def _garante_pagina_catalogo(self) -> None:
+        """Garante que a página 0 e a página 1 (catálogo) existam no arquivo."""
+        # Se o arquivo for novo, aloca a página 0 e a página 1 (PAGINA_CATALOGO)
+        while self.cache.pager.n_paginas <= PAGINA_CATALOGO:
+            self.cache.pager.aloca()
+
+        buf = self.cache.get_page(PAGINA_CATALOGO)
+        magic, tam_reg, _, _ = HEADER_PAGINA.unpack_from(buf, 0)
+        if magic != MAGIC or tam_reg != TAM_REGISTRO_CATALOGO:
+            # Inicializa cabeçalho da página 1 com slots_usados = 0
+            HEADER_PAGINA.pack_into(buf, 0, MAGIC, TAM_REGISTRO_CATALOGO, 0, b"\0" * 8)
+            self.cache.mark_dirty(PAGINA_CATALOGO)
+            self.cache.flush_page(PAGINA_CATALOGO)
+
+    def _carrega(self) -> None:
+        """Lê os metadados das tabelas gravados na página 1 do banco."""
+        buf = self.cache.get_page(PAGINA_CATALOGO)
+        magic, tam_reg, slots_usados, _ = HEADER_PAGINA.unpack_from(buf, 0)
+        if magic != MAGIC or tam_reg != TAM_REGISTRO_CATALOGO:
+            raise ErroSemantico("página de catálogo corrompida ou inválida")
+
+        offset = HEADER_SIZE
+        for _ in range(slots_usados):
+            nome_b, primeira, colunas_b = CATALOG_RECORD_STRUCT.unpack_from(buf, offset)
+            offset += TAM_REGISTRO_CATALOGO
+
+            nome = nome_b.split(b"\0", 1)[0].decode("utf-8")
+            colunas_str = colunas_b.split(b"\0", 1)[0].decode("utf-8")
+            if not nome:
+                continue
+            colunas = tuple(analisa_colunas(colunas_str))
+            self.tabelas[nome.casefold()] = Tabela(nome, colunas, primeira)
 
     def cria_tabela(self, nome: str, colunas, pagina: int) -> Tabela:
         chave = nome.casefold()
@@ -74,15 +132,45 @@ class Catalogo:
             raise ErroSemantico(f"tabela {nome} já existe")
         if not colunas:
             raise ErroSemantico("uma tabela precisa ter pelo menos uma coluna")
-        nomes = [c[0].casefold() for c in colunas]
+
+        nomes = [c[0].casefold() if isinstance(c, (tuple, list)) else c.nome.casefold() for c in colunas]
         if len(nomes) != len(set(nomes)):
             raise ErroSemantico("nomes de coluna duplicados")
-        objetos = tuple(Coluna(str(n), str(tipo).upper(), int(tam)) for n, tipo, tam in colunas)
+
+        objetos = tuple(
+            c if isinstance(c, Coluna) else Coluna(str(c[0]), str(c[1]).upper(), int(c[2]))
+            for c in colunas
+        )
         if sum(c.tamanho for c in objetos) > 4080:
             raise ErroSemantico("registro maior que o espaço disponível em uma página")
+
+        colunas_str = formata_colunas(objetos)
+        colunas_bytes = colunas_str.encode("utf-8")
+        if len(colunas_bytes) > 200:
+            raise ErroSemantico("definição de colunas excede 200 bytes no catálogo")
+
+        nome_bytes = nome.encode("utf-8")
+        if len(nome_bytes) > 32:
+            raise ErroSemantico("nome da tabela excede 32 bytes no catálogo")
+
+        buf = self.cache.get_page(PAGINA_CATALOGO)
+        magic, tam_reg, slots_usados, reservado = HEADER_PAGINA.unpack_from(buf, 0)
+        if slots_usados >= MAX_TABELAS_CATALOGO:
+            raise ErroSemantico("capacidade do catálogo esgotada (máximo de 17 tabelas)")
+
+        offset = HEADER_SIZE + slots_usados * TAM_REGISTRO_CATALOGO
+        reg_nome = nome_bytes + b"\0" * (32 - len(nome_bytes))
+        reg_colunas = colunas_bytes + b"\0" * (200 - len(colunas_bytes))
+        CATALOG_RECORD_STRUCT.pack_into(buf, offset, reg_nome, pagina, reg_colunas)
+
+        # Incrementa contador de tabelas na página de catálogo
+        HEADER_PAGINA.pack_into(buf, 0, magic, tam_reg, slots_usados + 1, reservado)
+        self.cache.mark_dirty(PAGINA_CATALOGO)
+        self.cache.flush_page(PAGINA_CATALOGO)
+        self.cache.pager.sync()
+
         tabela = Tabela(nome, objetos, pagina, 0)
         self.tabelas[chave] = tabela
-        self.salva()
         return tabela
 
     def busca(self, nome: str) -> Tabela:
@@ -92,9 +180,9 @@ class Catalogo:
             raise ErroSemantico(f"tabela {nome} não existe") from exc
 
     def atualiza_slots(self, nome: str, slots_usados: int):
+        """Atualização em memória para compatibilidade com versões anteriores."""
         t = self.busca(nome)
         self.tabelas[nome.casefold()] = Tabela(t.nome, t.colunas, t.pagina, slots_usados)
-        self.salva()
 
     def valida_valores(self, tabela: Tabela, valores):
         if len(valores) != len(tabela.colunas):
@@ -116,3 +204,7 @@ class Catalogo:
             if coluna.nome.casefold() == nome.casefold():
                 return i
         raise ErroSemantico(f"coluna {nome} não existe na tabela {tabela.nome}")
+
+    def close(self):
+        if self._pager_proprio is not None:
+            self.cache.close()
