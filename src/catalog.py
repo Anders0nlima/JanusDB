@@ -205,6 +205,77 @@ class Catalogo:
                 return i
         raise ErroSemantico(f"coluna {nome} não existe na tabela {tabela.nome}")
 
+    def valida_select(self, tabela: Tabela, arvore: dict) -> None:
+        """Valida semanticamente uma consulta SELECT (regras de projeção, agregação, WHERE e ORDER BY)."""
+        itens = arvore["colunas"]
+        tem_agregado = any(isinstance(c, tuple) and c[0] in ("COUNT", "SUM") for c in itens)
+        group_by = arvore.get("group_by")
+        consulta_agregada = tem_agregado or (group_by is not None)
+
+        if consulta_agregada:
+            if any(c == "*" for c in itens):
+                raise ErroSemantico("'*' não é permitido em consultas agregadas")
+
+            if group_by is not None:
+                self.busca_coluna(tabela, group_by)
+                for c in itens:
+                    if isinstance(c, tuple) and c[0] in ("COUNT", "SUM"):
+                        continue
+                    if isinstance(c, str):
+                        if c.casefold() != group_by.casefold():
+                            raise ErroSemantico(
+                                f"coluna '{c}' deve aparecer no GROUP BY ou em uma função agregada"
+                            )
+                    else:
+                        raise ErroSemantico(f"item de projeção inválido: {c!r}")
+            else:
+                for c in itens:
+                    if not (isinstance(c, tuple) and c[0] in ("COUNT", "SUM")):
+                        raise ErroSemantico(
+                            f"coluna '{c}' não permitida em consulta agregada sem GROUP BY"
+                        )
+        else:
+            if itens != ["*"]:
+                for c in itens:
+                    if isinstance(c, str):
+                        self.busca_coluna(tabela, c)
+                    else:
+                        raise ErroSemantico(f"função agregada inesperada em consulta não agregada: {c!r}")
+
+        # Validação de funções agregadas individuais
+        for c in itens:
+            if isinstance(c, tuple):
+                func = c[0]
+                if func == "SUM":
+                    nome_col = c[1]
+                    idx = self.busca_coluna(tabela, nome_col)
+                    col = tabela.colunas[idx]
+                    if col.tipo != "INT":
+                        raise ErroSemantico(f"SUM requer coluna INT, mas '{nome_col}' é {col.tipo}")
+                elif func == "COUNT":
+                    if c[1] != "*":
+                        raise ErroSemantico("COUNT só suporta '*'")
+
+        # Validação do WHERE
+        if arvore.get("where") is not None:
+            col_where, esperado = arvore["where"]
+            idx_where = self.busca_coluna(tabela, col_where)
+            coluna_w = tabela.colunas[idx_where]
+            if coluna_w.tipo == "INT" and not isinstance(esperado, int):
+                raise ErroSemantico(f"coluna {coluna_w.nome} é INT, veio {esperado!r}")
+            if coluna_w.tipo == "CHAR" and not isinstance(esperado, str):
+                raise ErroSemantico(f"coluna {coluna_w.nome} é CHAR, veio {esperado!r}")
+
+        # Validação do ORDER BY
+        if arvore.get("order_by") is not None:
+            col_ordem, _ = arvore["order_by"]
+            self.busca_coluna(tabela, col_ordem)
+            if consulta_agregada:
+                if group_by is None or col_ordem.casefold() != group_by.casefold():
+                    raise ErroSemantico(
+                        "em consulta agregada, ORDER BY só é permitido sobre a coluna do GROUP BY"
+                    )
+
     def close(self):
         if self._pager_proprio is not None:
             self.cache.close()

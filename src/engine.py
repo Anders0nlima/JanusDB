@@ -134,16 +134,12 @@ class Engine:
         if op == "INSERT":
             return self._insere(tabela, arvore["valores"])
         if op == "SELECT":
+            self.catalogo.valida_select(tabela, arvore)
             op_atual = SeqScan(self.cache, tabela)
             try:
                 if arvore["where"] is not None:
                     nome_coluna, esperado = arvore["where"]
                     idx_where = self.catalogo.busca_coluna(tabela, nome_coluna)
-                    coluna = tabela.colunas[idx_where]
-                    if coluna.tipo == "INT" and not isinstance(esperado, int):
-                        raise ErroSemantico(f"coluna {coluna.nome} é INT, veio {esperado!r}")
-                    if coluna.tipo == "CHAR" and not isinstance(esperado, str):
-                        raise ErroSemantico(f"coluna {coluna.nome} é CHAR, veio {esperado!r}")
                     op_atual = Filter(op_atual, idx_where, esperado)
 
                 if arvore["colunas"] == ["*"]:

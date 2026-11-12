@@ -45,3 +45,54 @@ def test_catalogo_valida_tipos_quantidade_e_colunas(tmp_path):
         cat.cria_tabela("ALUNO", [("x", "INT", 4)], 1)
     with pytest.raises(ErroSemantico):
         cat.busca_coluna(t, "idade")
+
+
+def test_valida_consultas_agregadas_e_order_by(tmp_path):
+    cat = Catalogo(str(tmp_path / "banco.db"))
+    t = cat.cria_tabela("aluno", [("id", "INT", 4), ("nome", "CHAR", 20), ("salario", "INT", 4)], 0)
+
+    # Consulta agregada válida com GROUP BY e ORDER BY
+    cat.valida_select(t, {
+        "colunas": ["id", ("COUNT", "*"), ("SUM", "salario")],
+        "group_by": "id",
+        "order_by": ("id", "ASC"),
+        "where": None,
+    })
+
+    # Consulta agregada válida sem GROUP BY
+    cat.valida_select(t, {
+        "colunas": [("COUNT", "*"), ("SUM", "salario")],
+        "group_by": None,
+        "order_by": None,
+        "where": None,
+    })
+
+    # Erro: '*' em consulta agregada
+    with pytest.raises(ErroSemantico):
+        cat.valida_select(t, {"colunas": ["*", ("COUNT", "*")], "group_by": None, "order_by": None, "where": None})
+
+    # Erro: Coluna solta em consulta agregada sem GROUP BY
+    with pytest.raises(ErroSemantico):
+        cat.valida_select(t, {"colunas": ["nome", ("COUNT", "*")], "group_by": None, "order_by": None, "where": None})
+
+    # Erro: Coluna não listada no GROUP BY
+    with pytest.raises(ErroSemantico):
+        cat.valida_select(t, {"colunas": ["nome", ("COUNT", "*")], "group_by": "id", "order_by": None, "where": None})
+
+    # Erro: SUM sobre CHAR
+    with pytest.raises(ErroSemantico):
+        cat.valida_select(t, {"colunas": [("SUM", "nome")], "group_by": None, "order_by": None, "where": None})
+
+    # Erro: ORDER BY em coluna fora do GROUP BY numa consulta agregada
+    with pytest.raises(ErroSemantico):
+        cat.valida_select(t, {
+            "colunas": ["id", ("COUNT", "*")],
+            "group_by": "id",
+            "order_by": ("nome", "ASC"),
+            "where": None,
+        })
+
+    # Erro: ORDER BY em coluna que não existe
+    with pytest.raises(ErroSemantico):
+        cat.valida_select(t, {"colunas": ["*"], "group_by": None, "order_by": ("inexistente", "ASC"), "where": None})
+
