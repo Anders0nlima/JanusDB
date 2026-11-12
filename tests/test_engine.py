@@ -32,3 +32,35 @@ def test_select_coluna_inexistente(tmp_path):
         db.executa("CREATE TABLE aluno (id INT)")
         with pytest.raises(ErroSemantico):
             db.executa("SELECT idade FROM aluno")
+
+
+def test_select_tabela_vazia(tmp_path):
+    with Engine(str(tmp_path / "banco.db")) as db:
+        db.executa("CREATE TABLE aluno (id INT, nome CHAR(10))")
+        assert db.executa("SELECT * FROM aluno") == "(0 linhas)"
+        assert db.executa("SELECT nome FROM aluno") == "(0 linhas)"
+
+
+def test_select_projecao_ordem_das_colunas(tmp_path):
+    with Engine(str(tmp_path / "banco.db")) as db:
+        db.executa("CREATE TABLE aluno (id INT, nome CHAR(10))")
+        db.executa("INSERT INTO aluno VALUES (1, 'Ana')")
+        db.executa("INSERT INTO aluno VALUES (2, 'Bruno')")
+        # Invertendo a ordem das colunas na projeção
+        assert db.executa("SELECT nome, id FROM aluno") == "Ana|1\nBruno|2\n(2 linhas)"
+
+
+def test_select_filtro_where_string(tmp_path):
+    with Engine(str(tmp_path / "banco.db")) as db:
+        db.executa("CREATE TABLE aluno (id INT, nome CHAR(10))")
+        db.executa("INSERT INTO aluno VALUES (1, 'Ana')")
+        db.executa("INSERT INTO aluno VALUES (2, 'Bruno')")
+        assert db.executa("SELECT id FROM aluno WHERE nome = 'Bruno'") == "2\n(1 linha)"
+
+
+def test_select_where_sem_correspondencia(tmp_path):
+    with Engine(str(tmp_path / "banco.db")) as db:
+        db.executa("CREATE TABLE aluno (id INT, nome CHAR(10))")
+        db.executa("INSERT INTO aluno VALUES (1, 'Ana')")
+        assert db.executa("SELECT * FROM aluno WHERE id = 999") == "(0 linhas)"
+
