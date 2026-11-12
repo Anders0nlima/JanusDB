@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 PALAVRAS_RESERVADAS = {
     "CREATE", "TABLE", "INT", "CHAR", "INSERT", "INTO", "VALUES",
-    "SELECT", "FROM", "WHERE",
+    "SELECT", "FROM", "WHERE", "ORDER", "BY", "GROUP", "ASC", "DESC",
 }
 SIMBOLOS = set("(),;*=")
 

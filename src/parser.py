@@ -74,14 +74,29 @@ class Parser:
         self.espera("SIMBOLO", ")")
         return {"op": "INSERT", "tabela": tabela, "valores": valores}
 
+    def item(self):
+        if self.aceita("SIMBOLO", "*"):
+            return "*"
+        nome = self.nome()
+        if self.aceita("SIMBOLO", "("):
+            func = nome.upper()
+            if func == "COUNT":
+                self.espera("SIMBOLO", "*")
+                self.espera("SIMBOLO", ")")
+                return ("COUNT", "*")
+            elif func == "SUM":
+                col = self.nome()
+                self.espera("SIMBOLO", ")")
+                return ("SUM", col)
+            else:
+                raise ErroSintatico(f"função agregada desconhecida: {nome}")
+        return nome
+
     def select(self):
         self.espera("PALAVRA", "SELECT")
-        if self.aceita("SIMBOLO", "*"):
-            colunas = ["*"]
-        else:
-            colunas = [self.nome()]
-            while self.aceita("SIMBOLO", ","):
-                colunas.append(self.nome())
+        colunas = [self.item()]
+        while self.aceita("SIMBOLO", ","):
+            colunas.append(self.item())
         self.espera("PALAVRA", "FROM")
         tabela = self.nome()
         where = None
@@ -89,7 +104,24 @@ class Parser:
             coluna = self.nome()
             self.espera("SIMBOLO", "=")
             where = (coluna, self.valor())
-        return {"op": "SELECT", "colunas": colunas, "tabela": tabela, "where": where}
+
+        arvore = {"op": "SELECT", "colunas": colunas, "tabela": tabela, "where": where}
+
+        if self.aceita("PALAVRA", "GROUP"):
+            self.espera("PALAVRA", "BY")
+            arvore["group_by"] = self.nome()
+
+        if self.aceita("PALAVRA", "ORDER"):
+            self.espera("PALAVRA", "BY")
+            col_ordem = self.nome()
+            direcao = "ASC"
+            if self.aceita("PALAVRA", "ASC"):
+                direcao = "ASC"
+            elif self.aceita("PALAVRA", "DESC"):
+                direcao = "DESC"
+            arvore["order_by"] = (col_ordem, direcao)
+
+        return arvore
 
     def comando(self):
         t = self.olha()
