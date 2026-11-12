@@ -13,12 +13,50 @@ class PageCache:
         # page_id -> bytearray. A ordem representa do menos para o mais usado.
         self._paginas: OrderedDict[int, bytearray] = OrderedDict()
         self._dirty: set[int] = set()
+        self._pin: dict[int, int] = {}
         self.hits = 0
         self.misses = 0
 
     def _valida_pagina(self, pagina: int) -> None:
         if not isinstance(pagina, int) or isinstance(pagina, bool) or pagina < 0:
             raise ValueError(f"Página inválida: {pagina}")
+
+    def fixa(self, pagina: int) -> None:
+        #Fixa uma página na memória (impede evicção pelo LRU).
+        self._valida_pagina(pagina)
+        self._pin[pagina] = self._pin.get(pagina, 0) + 1
+
+    def solta(self, pagina: int) -> None:
+        #Libera a fixação de uma página.
+        self._valida_pagina(pagina)
+        cont = self._pin.get(pagina, 0)
+        if cont <= 0:
+            raise ValueError(f"Página {pagina} não está fixada")
+        if cont == 1:
+            del self._pin[pagina]
+        else:
+            self._pin[pagina] = cont - 1
+
+    @property
+    def pin_count(self):
+        #Retorna um rastreador de fixações que funciona como int e função.
+        cache_self = self
+
+        class PinTracker(int):
+            def __new__(cls):
+                total = sum(cache_self._pin.values())
+                return super().__new__(cls, total)
+
+            def __call__(self, pagina: int | None = None) -> int:
+                if pagina is None:
+                    return int(self)
+                cache_self._valida_pagina(pagina)
+                return cache_self._pin.get(pagina, 0)
+
+            def __getitem__(self, pagina: int) -> int:
+                return self(pagina)
+
+        return PinTracker()
 
     def get_page(self, pagina: int) -> bytearray:
         #Retorna uma página do cache, carregando-a do Pager se necessário.
@@ -31,10 +69,15 @@ class PageCache:
 
         self.misses += 1
 
-        # Se o cache estiver cheio, remove a página LRU. Uma página suja
-        # precisa ser persistida antes de perdermos sua única cópia em RAM.
+        # Se o cache estiver cheio, remove a página LRU que não estiver fixada.
         if len(self._paginas) >= self.capacidade:
-            vitima = next(iter(self._paginas))
+            vitima = None
+            for p in self._paginas:
+                if self._pin.get(p, 0) == 0:
+                    vitima = p
+                    break
+            if vitima is None:
+                raise RuntimeError("Todas as páginas no cache estão fixadas")
             self._flush_page(vitima)
             del self._paginas[vitima]
 

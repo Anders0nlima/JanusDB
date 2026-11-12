@@ -4,6 +4,7 @@ import struct
 
 from .cache import PageCache
 from .catalog import Catalogo, ErroSemantico, Tabela
+from .operadores import Filter, Project, SeqScan
 from .parser import analisa
 from .storage import HEADER_SIZE, PAGE_SIZE, Pager
 
@@ -133,21 +134,35 @@ class Engine:
         if op == "INSERT":
             return self._insere(tabela, arvore["valores"])
         if op == "SELECT":
-            registros, _, _ = self._le_registros(tabela)
-            if arvore["where"] is not None:
-                nome_coluna, esperado = arvore["where"]
-                idx_where = self.catalogo.busca_coluna(tabela, nome_coluna)
-                coluna = tabela.colunas[idx_where]
-                if coluna.tipo == "INT" and not isinstance(esperado, int):
-                    raise ErroSemantico(f"coluna {coluna.nome} é INT, veio {esperado!r}")
-                if coluna.tipo == "CHAR" and not isinstance(esperado, str):
-                    raise ErroSemantico(f"coluna {coluna.nome} é CHAR, veio {esperado!r}")
-                registros = [r for r in registros if r[idx_where] == esperado]
-            if arvore["colunas"] == ["*"]:
-                indices = list(range(len(tabela.colunas)))
-            else:
-                indices = [self.catalogo.busca_coluna(tabela, n) for n in arvore["colunas"]]
-            linhas = ["|".join(str(registro[i]) for i in indices) for registro in registros]
+            op_atual = SeqScan(self.cache, tabela)
+            try:
+                if arvore["where"] is not None:
+                    nome_coluna, esperado = arvore["where"]
+                    idx_where = self.catalogo.busca_coluna(tabela, nome_coluna)
+                    coluna = tabela.colunas[idx_where]
+                    if coluna.tipo == "INT" and not isinstance(esperado, int):
+                        raise ErroSemantico(f"coluna {coluna.nome} é INT, veio {esperado!r}")
+                    if coluna.tipo == "CHAR" and not isinstance(esperado, str):
+                        raise ErroSemantico(f"coluna {coluna.nome} é CHAR, veio {esperado!r}")
+                    op_atual = Filter(op_atual, idx_where, esperado)
+
+                if arvore["colunas"] == ["*"]:
+                    indices = list(range(len(tabela.colunas)))
+                else:
+                    indices = [self.catalogo.busca_coluna(tabela, n) for n in arvore["colunas"]]
+
+                op_atual = Project(op_atual, indices)
+
+                linhas = []
+                op_atual.abre()
+                while True:
+                    linha = op_atual.proximo()
+                    if linha is None:
+                        break
+                    linhas.append("|".join(str(val) for val in linha))
+            finally:
+                op_atual.fecha()
+
             sufixo_linha = "linha" if len(linhas) == 1 else "linhas"
             return "\n".join(linhas + [f"({len(linhas)} {sufixo_linha})"])
         raise ErroSemantico(f"operação não suportada: {op}")

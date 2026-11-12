@@ -92,3 +92,23 @@ def test_tabela_multiplas_paginas_insere_e_seleciona(tmp_path):
         assert db.executa("SELECT nome FROM aluno WHERE id = 150") == "Aluno_150\n(1 linha)"
 
 
+def test_pin_count_zerado_apos_consulta_e_erros(tmp_path):
+    caminho = str(tmp_path / "banco_pin.db")
+    with Engine(caminho) as db:
+        db.executa("CREATE TABLE aluno (id INT, nome CHAR(10))")
+        db.executa("INSERT INTO aluno VALUES (1, 'Ana')")
+        db.executa("INSERT INTO aluno VALUES (2, 'Bob')")
+
+        db.executa("SELECT * FROM aluno")
+        assert db.cache.pin_count == 0
+
+        db.executa("SELECT nome FROM aluno WHERE id = 1")
+        assert db.cache.pin_count == 0
+
+        # Erro semântico na validação do WHERE
+        with pytest.raises(ErroSemantico):
+            db.executa("SELECT * FROM aluno WHERE id = 'texto'")
+        assert db.cache.pin_count == 0
+
+
+
