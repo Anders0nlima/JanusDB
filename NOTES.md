@@ -45,3 +45,10 @@ As notas detalhadas de cada módulo, com suas implementações e principais difi
    - Catálogo de tabelas residente na **página 1** do arquivo com registros de 236 bytes.
    - Motor de execução (`engine.py`) e CLI com suporte a terminal interativo e entrada redirecionada (`minidb`).
 
+5. [M5 — Executor: Varredura Sequencial e Operadores (Fase 0)](notes/M5.md)
+   - Tabelas com múltiplas páginas encadeadas via ponteiro `proxima_pagina` no cabeçalho binário `<4sHHI4s`.
+   - Mecanismo de fixação (*pin/unpin*) com proteção contra descarte LRU e rastreamento de `pin_count` no `PageCache`.
+   - Modelo de iterador relacional (Volcano) com `SeqScan`, `Filter` e `Project` consumindo tuplas sob demanda.
+   - Fechamento seguro de operadores com liberação irrestrita de alfinetes em bloco `try/finally`.
+
+
