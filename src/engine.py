@@ -8,7 +8,7 @@ from .parser import analisa
 from .storage import HEADER_SIZE, PAGE_SIZE, Pager
 
 MAGIC = b"JDB4"
-HEADER = struct.Struct("<4sHH8s")  # magic, tamanho do registro, slots ocupados, reservado
+HEADER = struct.Struct("<4sHHI4s")  # magic, tamanho do registro, slots ocupados, proxima_pagina, reservado
 DATA_START = HEADER_SIZE
 
 
@@ -21,58 +21,94 @@ class Engine:
         self.cache = PageCache(self.pager, capacidade=capacidade_cache)
         self.catalogo = Catalogo(self.cache)
 
-    def _inicializa_pagina_tabela(self, pagina: int, tamanho_registro: int):
+    def _inicializa_pagina_tabela(self, pagina: int, tamanho_registro: int, proxima_pagina: int = 0):
         buf = self.cache.get_page(pagina)
-        HEADER.pack_into(buf, 0, MAGIC, tamanho_registro, 0, b"\0" * 8)
+        HEADER.pack_into(buf, 0, MAGIC, tamanho_registro, 0, proxima_pagina, b"\0" * 4)
         self.cache.mark_dirty(pagina)
 
     def _le_registros(self, tabela: Tabela):
-        buf = self.cache.get_page(tabela.pagina)
-        magic, tamanho, quantidade, _ = HEADER.unpack_from(buf, 0)
-        if magic != MAGIC or tamanho != tabela.tamanho_registro:
-            raise ErroSemantico(f"página de dados inválida para a tabela {tabela.nome}")
-        capacidade = (PAGE_SIZE - DATA_START) // tamanho
-        if quantidade > capacidade:
-            raise ErroSemantico("cabeçalho da página contém quantidade de registros inválida")
         registros = []
-        offset = DATA_START
-        for _ in range(quantidade):
-            valores = []
-            for coluna in tabela.colunas:
-                bruto = bytes(buf[offset:offset + coluna.tamanho])
-                offset += coluna.tamanho
-                if coluna.tipo == "INT":
-                    valores.append(struct.unpack("<I", bruto)[0])
-                else:
-                    texto = bruto.split(b"\0", 1)[0]
-                    valores.append(texto.decode("utf-8"))
-            registros.append(valores)
-        return registros, quantidade, capacidade
+        total_quantidade = 0
+        pagina_atual = tabela.pagina
+        capacidade = 0
+
+        while pagina_atual != 0:
+            buf = self.cache.get_page(pagina_atual)
+            magic, tamanho, quantidade, proxima, _ = HEADER.unpack_from(buf, 0)
+            if magic != MAGIC or tamanho != tabela.tamanho_registro:
+                raise ErroSemantico(f"página de dados {pagina_atual} inválida para a tabela {tabela.nome}")
+            capacidade = (PAGE_SIZE - DATA_START) // tamanho
+            if quantidade > capacidade:
+                raise ErroSemantico(f"cabeçalho da página {pagina_atual} contém quantidade de registros inválida")
+            offset = DATA_START
+            for _ in range(quantidade):
+                valores = []
+                for coluna in tabela.colunas:
+                    bruto = bytes(buf[offset:offset + coluna.tamanho])
+                    offset += coluna.tamanho
+                    if coluna.tipo == "INT":
+                        valores.append(struct.unpack("<I", bruto)[0])
+                    else:
+                        texto = bruto.split(b"\0", 1)[0]
+                        valores.append(texto.decode("utf-8"))
+                registros.append(valores)
+            total_quantidade += quantidade
+            pagina_atual = proxima
+
+        return registros, total_quantidade, capacidade
 
     def _insere(self, tabela: Tabela, valores):
         self.catalogo.valida_valores(tabela, valores)
-        registros, quantidade, capacidade = self._le_registros(tabela)
-        if quantidade >= capacidade:
-            raise ErroSemantico(
-                f"a página da tabela {tabela.nome} está cheia ({capacidade} registros); páginas múltiplas ficam para o M5"
-            )
-        buf = self.cache.get_page(tabela.pagina)
-        offset = DATA_START + quantidade * tabela.tamanho_registro
-        for coluna, valor in zip(tabela.colunas, valores):
-            if coluna.tipo == "INT":
-                bruto = struct.pack("<I", valor)
-            else:
-                codificado = valor.encode("utf-8")
-                bruto = codificado + b"\0" * (coluna.tamanho - len(codificado))
-            buf[offset:offset + coluna.tamanho] = bruto
-            offset += coluna.tamanho
-        magic, tamanho, _, reservado = HEADER.unpack_from(buf, 0)
-        HEADER.pack_into(buf, 0, magic, tamanho, quantidade + 1, reservado)
-        self.cache.mark_dirty(tabela.pagina)
-        self.cache.flush_page(tabela.pagina)
-        self.pager.sync()
-        self.catalogo.atualiza_slots(tabela.nome, quantidade + 1)
-        return "OK 1"
+        pagina_atual = tabela.pagina
+        while True:
+            buf = self.cache.get_page(pagina_atual)
+            magic, tamanho, quantidade, proxima, reservado = HEADER.unpack_from(buf, 0)
+            if magic != MAGIC or tamanho != tabela.tamanho_registro:
+                raise ErroSemantico(f"página de dados {pagina_atual} inválida para a tabela {tabela.nome}")
+            if proxima == 0:
+                break
+            pagina_atual = proxima
+
+        capacidade = (PAGE_SIZE - DATA_START) // tamanho
+        if quantidade < capacidade:
+            offset = DATA_START + quantidade * tabela.tamanho_registro
+            for coluna, valor in zip(tabela.colunas, valores):
+                if coluna.tipo == "INT":
+                    bruto = struct.pack("<I", valor)
+                else:
+                    codificado = valor.encode("utf-8")
+                    bruto = codificado + b"\0" * (coluna.tamanho - len(codificado))
+                buf[offset:offset + coluna.tamanho] = bruto
+                offset += coluna.tamanho
+            HEADER.pack_into(buf, 0, magic, tamanho, quantidade + 1, proxima, reservado)
+            self.cache.mark_dirty(pagina_atual)
+            self.cache.flush_page(pagina_atual)
+            self.pager.sync()
+            return "OK 1"
+        else:
+            nova_pagina = self.pager.aloca()
+            self._inicializa_pagina_tabela(nova_pagina, tamanho, proxima_pagina=0)
+            buf_nova = self.cache.get_page(nova_pagina)
+            offset = DATA_START
+            for coluna, valor in zip(tabela.colunas, valores):
+                if coluna.tipo == "INT":
+                    bruto = struct.pack("<I", valor)
+                else:
+                    codificado = valor.encode("utf-8")
+                    bruto = codificado + b"\0" * (coluna.tamanho - len(codificado))
+                buf_nova[offset:offset + coluna.tamanho] = bruto
+                offset += coluna.tamanho
+
+            HEADER.pack_into(buf_nova, 0, MAGIC, tamanho, 1, 0, b"\0" * 4)
+            self.cache.mark_dirty(nova_pagina)
+
+            HEADER.pack_into(buf, 0, magic, tamanho, quantidade, nova_pagina, reservado)
+            self.cache.mark_dirty(pagina_atual)
+
+            self.cache.flush_page(pagina_atual)
+            self.cache.flush_page(nova_pagina)
+            self.pager.sync()
+            return "OK 1"
 
     def executa(self, sql: str):
         arvore = analisa(sql)
