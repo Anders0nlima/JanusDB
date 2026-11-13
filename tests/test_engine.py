@@ -111,4 +111,29 @@ def test_pin_count_zerado_apos_consulta_e_erros(tmp_path):
         assert db.cache.pin_count == 0
 
 
+def test_order_by_ponta_a_ponta(tmp_path):
+    caminho = str(tmp_path / "banco_order.db")
+    with Engine(caminho) as db:
+        db.executa("CREATE TABLE aluno (id INT, nome CHAR(10))")
+        db.executa("INSERT INTO aluno VALUES (3, 'Carlos')")
+        db.executa("INSERT INTO aluno VALUES (1, 'Ana')")
+        db.executa("INSERT INTO aluno VALUES (2, 'Bruno')")
+
+        # ORDER BY id ASC (padrão implícito)
+        assert db.executa("SELECT * FROM aluno ORDER BY id") == "1|Ana\n2|Bruno\n3|Carlos\n(3 linhas)"
+
+        # ORDER BY id DESC
+        assert db.executa("SELECT * FROM aluno ORDER BY id DESC") == "3|Carlos\n2|Bruno\n1|Ana\n(3 linhas)"
+
+        # ORDER BY coluna que NÃO aparece na projeção do SELECT
+        assert db.executa("SELECT nome FROM aluno ORDER BY id DESC") == "Carlos\nBruno\nAna\n(3 linhas)"
+
+        # ORDER BY combinado com WHERE
+        assert db.executa("SELECT nome FROM aluno WHERE id = 2 ORDER BY id") == "Bruno\n(1 linha)"
+
+        # Cache continua sem alfinetes vazando
+        assert db.cache.pin_count == 0
+
+
+
 

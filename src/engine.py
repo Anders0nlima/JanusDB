@@ -6,6 +6,7 @@ from .cache import PageCache
 from .catalog import Catalogo, ErroSemantico, Tabela
 from .operadores import Filter, Project, SeqScan
 from .parser import analisa
+from .sort import Sort
 from .storage import HEADER_SIZE, PAGE_SIZE, Pager
 
 MAGIC = b"JDB4"
@@ -141,6 +142,11 @@ class Engine:
                     nome_coluna, esperado = arvore["where"]
                     idx_where = self.catalogo.busca_coluna(tabela, nome_coluna)
                     op_atual = Filter(op_atual, idx_where, esperado)
+
+                if "order_by" in arvore and arvore["order_by"] is not None:
+                    col_ordem, direcao = arvore["order_by"]
+                    idx_ordem = self.catalogo.busca_coluna(tabela, col_ordem)
+                    op_atual = Sort(op_atual, idx_ordem, direcao, esquema=tabela.colunas)
 
                 if arvore["colunas"] == ["*"]:
                     indices = list(range(len(tabela.colunas)))
