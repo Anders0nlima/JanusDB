@@ -51,4 +51,11 @@ As notas detalhadas de cada módulo, com suas implementações e principais difi
    - Modelo de iterador relacional (Volcano) com `SeqScan`, `Filter` e `Project` consumindo tuplas sob demanda.
    - Fechamento seguro de operadores com liberação irrestrita de alfinetes em bloco `try/finally`.
 
+6. [M5 — Gramática Estendida, Codec de Linhas e Ordenação (Fase 1)](notes/M5_fase1.md)
+   - Extensão do tokenizador e parser com `ORDER BY`, `GROUP BY`, `COUNT(*)` e `SUM(col)`.
+   - Validação semântica de consultas agregadas e regras de ordenação no catálogo.
+   - Codec binário universal (`CodecLinha`) para serialização de `INT`, `CHAR(n)` e `BIGINT`.
+   - Operador `Sort` em memória com estabilidade e posicionamento antes do `Project`.
+
+
 
