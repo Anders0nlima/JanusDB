@@ -57,5 +57,12 @@ As notas detalhadas de cada módulo, com suas implementações e principais difi
    - Codec binário universal (`CodecLinha`) para serialização de `INT`, `CHAR(n)` e `BIGINT`.
    - Operador `Sort` em memória com estabilidade e posicionamento antes do `Project`.
 
+7. [M5 — Ordenação Externa, Agregação e Integração Completa (Fase 2)](notes/M5_fase2.md)
+   - Ordenação externa com geração de runs ordenados e intercalação k-way via `MinHeap` estável.
+   - Operador `Aggregate` por hash em memória para `COUNT(*)` e `SUM(col)` com suporte a acumuladores de 64 bits.
+   - Intercalação com leitores de run fixando páginas no `PageCache` e streaming na última passada sem gravação.
+   - Medição de I/O de disco via `ContadorPager` e exclusão segura de arquivos temporários no Windows.
+
+
 
 

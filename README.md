@@ -8,11 +8,11 @@ Linguagem: Python.
 - [X] M2 — Cache de páginas
 - [X] M3 — Árvore B+, busca e inserção
 - [X] M4 — Parser e catálogo
-- [ ] M5 — Executor: varredura sequencial e por índice
+- [X] M5 — Executor: varredura sequencial, ordenação externa e agregação (Tópico 6)
 - [ ] M6 — Transações: BEGIN, COMMIT, ROLLBACK
 - [ ] M7 — Recuperação: log de escrita antecipada
 
-## Executável e CLI (M4)
+## Executável e CLI (M4 e M5)
 
 O JanusDB disponibiliza o script executável `minidb` na raiz do projeto (ou `python -m src.cli`), suportando modo interativo e redirecionamento de entrada:
 
@@ -29,10 +29,13 @@ Comandos SQL suportados:
 - `INSERT INTO nome VALUES (1, 'Texto');`
 - `SELECT * FROM nome;`
 - `SELECT col1, col2 FROM nome WHERE col = valor;`
+- `SELECT col1 FROM nome ORDER BY col2 [ASC | DESC];`
+- `SELECT COUNT(*), SUM(col) FROM nome [WHERE col = valor];`
+- `SELECT col, COUNT(*), SUM(col2) FROM nome [WHERE col = valor] GROUP BY col [ORDER BY col [ASC | DESC]];`
 
 ## Como rodar os testes
 
-Para executar todos os testes do projeto (M1 ao M4):
+Para executar todos os testes do projeto (M1 ao M5):
 ```powershell
 $env:PYTHONPATH="."; pytest tests -v
 ```
@@ -50,6 +53,9 @@ $env:PYTHONPATH="."; pytest tests/test_btree.py -v
 
 # Testes do M4 (Parser, Catálogo e Engine)
 $env:PYTHONPATH="."; pytest tests/test_parser.py tests/test_catalog.py tests/test_engine.py -v
+
+# Testes do M5 / Tópico 6 (Ordenação Externa, Agregação e Consultas Combinadas)
+$env:PYTHONPATH="."; pytest tests/test_sort.py tests/test_aggregate.py tests/test_combinadas.py -v
 ```
 
 ## Verificação Hexadecimal do Registro (M1)
