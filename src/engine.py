@@ -2,6 +2,7 @@
 import os
 import struct
 
+from .aggregate import Aggregate
 from .cache import PageCache
 from .catalog import Catalogo, ErroSemantico, Tabela
 from .operadores import Filter, Project, SeqScan
@@ -143,17 +144,61 @@ class Engine:
                     idx_where = self.catalogo.busca_coluna(tabela, nome_coluna)
                     op_atual = Filter(op_atual, idx_where, esperado)
 
-                if "order_by" in arvore and arvore["order_by"] is not None:
-                    col_ordem, direcao = arvore["order_by"]
-                    idx_ordem = self.catalogo.busca_coluna(tabela, col_ordem)
-                    op_atual = Sort(op_atual, idx_ordem, direcao, esquema=tabela.colunas)
+                tem_agregado = any(isinstance(c, tuple) and c[0] in ("COUNT", "SUM") for c in arvore["colunas"])
+                group_by_col = arvore.get("group_by")
+                consulta_agregada = tem_agregado or (group_by_col is not None)
 
-                if arvore["colunas"] == ["*"]:
-                    indices = list(range(len(tabela.colunas)))
+                if consulta_agregada:
+                    agregados_info = []
+                    agregados_map = {}
+                    colunas_saida_agg = []
+                    group_by_idx = None
+                    if group_by_col is not None:
+                        group_by_idx = self.catalogo.busca_coluna(tabela, group_by_col)
+                        colunas_saida_agg.append(group_by_col.casefold())
+
+                    for item in arvore["colunas"]:
+                        if isinstance(item, tuple):
+                            func, arg = item
+                            chave_agg = (func, arg.casefold() if isinstance(arg, str) else arg)
+                            if chave_agg not in agregados_map:
+                                if func == "COUNT":
+                                    col_idx = None
+                                elif func == "SUM":
+                                    col_idx = self.catalogo.busca_coluna(tabela, arg)
+                                idx_no_agg = len(colunas_saida_agg)
+                                agregados_map[chave_agg] = idx_no_agg
+                                agregados_info.append((func, col_idx))
+                                colunas_saida_agg.append(chave_agg)
+
+                    op_atual = Aggregate(op_atual, agregados_info, group_by_idx)
+
+                    if "order_by" in arvore and arvore["order_by"] is not None:
+                        col_ordem, direcao = arvore["order_by"]
+                        op_atual = Sort(op_atual, 0, direcao)
+
+                    indices_proj = []
+                    for item in arvore["colunas"]:
+                        if isinstance(item, str):
+                            indices_proj.append(0)
+                        elif isinstance(item, tuple):
+                            func, arg = item
+                            chave_agg = (func, arg.casefold() if isinstance(arg, str) else arg)
+                            indices_proj.append(agregados_map[chave_agg])
+
+                    op_atual = Project(op_atual, indices_proj)
                 else:
-                    indices = [self.catalogo.busca_coluna(tabela, n) for n in arvore["colunas"]]
+                    if "order_by" in arvore and arvore["order_by"] is not None:
+                        col_ordem, direcao = arvore["order_by"]
+                        idx_ordem = self.catalogo.busca_coluna(tabela, col_ordem)
+                        op_atual = Sort(op_atual, idx_ordem, direcao, esquema=tabela.colunas)
 
-                op_atual = Project(op_atual, indices)
+                    if arvore["colunas"] == ["*"]:
+                        indices = list(range(len(tabela.colunas)))
+                    else:
+                        indices = [self.catalogo.busca_coluna(tabela, n) for n in arvore["colunas"]]
+
+                    op_atual = Project(op_atual, indices)
 
                 linhas = []
                 op_atual.abre()
